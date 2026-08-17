@@ -177,9 +177,34 @@ if [ "${FACTORY_DEFAULT_DHCP_BEHAVIOR}" == "true" ]; then
     DHCP_CLASS_ID_DP_IPV6="00:00:16:47:00:0c:4E:56:49:44:49:41:2f:42:46:2f:44:50"
 fi
 
+# Get the local (inbox) NVMe device on BlueField.
+# On JBOF systems, multiple external NVMe drives are connected via a PCIe
+# switch with longer PCI topology paths. The local NVMe is directly attached
+# to the SoC root complex and has the shortest PCI device path (fewest hops).
+# Falls back to the traditional sort-by-name if sysfs paths are unavailable.
+get_local_nvme()
+{
+    local shortest=""
+    local min_depth=999
+    for ctrl in /sys/class/nvme/nvme*; do
+        [ -e "$ctrl/device" ] || continue
+        local devpath=$(readlink -f "$ctrl/device")
+        local depth=$(echo "$devpath" | grep -o "0000:" | wc -l)
+        if [ "$depth" -lt "$min_depth" ]; then
+            min_depth=$depth
+            shortest=$(basename "$ctrl")
+        fi
+    done
+    if [ -n "$shortest" ] && [ -b "/dev/${shortest}n1" ]; then
+        echo "${shortest}n1"
+    else
+        echo "$(cd /sys/block; /bin/ls -1d nvme* 2>/dev/null | sort -V | tail -1)"
+    fi
+}
+
 default_device=/dev/mmcblk0
 if [ -b /dev/nvme0n1 ]; then
-    default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
+    default_device="/dev/$(get_local_nvme)"
 fi
 device=${device:-"$default_device"}
 BOOT_PARTITION=${device}p1
@@ -387,6 +412,8 @@ network:
           via: "192.168.100.1"
           metric: 1025
 EOF
+		chmod 600 /etc/netplan/70-nodnic-h2g.yaml
+
 		cat > /etc/netplan/71-vlan4040.yaml << 'EOF'
 network:
   version: 2
@@ -402,6 +429,7 @@ network:
         - "192.168.240.2/29"
       dhcp4: false
 EOF
+		chmod 600 /etc/netplan/71-vlan4040.yaml
 	fi
 	return 0
 }
@@ -553,8 +581,8 @@ stage_sfc_hbn_install()
 	CLOUD_OPTION=${CLOUD_OPTION:-""}
 	HBN_IFNAME_WAIT_TIMEOUT=${HBN_IFNAME_WAIT_TIMEOUT:-300}
 	HBN_IFNAME_WAIT_INTERVAL=${HBN_IFNAME_WAIT_INTERVAL:-10}
-	BR_HBN_VF_GROUPS=${BR_HBN_VF_GROUPS:-"c1pf0:0-12;c1pf1:0-5"}
-	BR_SFC_VF_GROUPS=${BR_SFC_VF_GROUPS:-"pf0dpu1,pfdpu3"}
+	BR_HBN_VF_GROUPS=${BR_HBN_VF_GROUPS:-"c1pf0:0-13"}
+	BR_SFC_VF_GROUPS=${BR_SFC_VF_GROUPS:-""}
 
 	log "INFO: Staging deferred SFC-HBN install"
 	mkdir -p /var/lib/sfc-hbn
