@@ -211,20 +211,6 @@ if [ -e /etc/os-release ]; then
 fi
 
 if [ $1 -eq 1 ]; then
-if (grep -q OFED-internal /usr/bin/ofed_info > /dev/null 2>&1); then
-    ofed_version=`ofed_info -n`
-    ofed_minor=${ofed_version#*-}
-    fw_minor=`rpm -q --queryformat "%{RELEASE}" mlnx-fw-updater 2> /dev/null 2>&1 | cut -d '-' -f 2`
-    fw_sub_minor=`echo $fw_minor | cut -d '.' -f -3`
-    if [ "$ofed_minor" == "$fw_sub_minor" ]; then
-        ofed_version=${ofed_version}.`echo $fw_minor | cut -d '.' -f 4`
-    fi
-    sed -i -r -e "s/^(OFED)(.*)(-[0-9]*.*-[0-9]*.*):/MLNX_OFED_LINUX-${ofed_version} (\1\3):\n/" /usr/bin/ofed_info
-    sed -i -r -e "s/(.*then echo) (.*):(.*)/\1 MLNX_OFED_LINUX-${ofed_version}: \3/" /usr/bin/ofed_info
-    sed -i -r -e "s/(.*X-n\" ]; then echo) (.*)(; exit.*)/\1 ${ofed_version} \3/" /usr/bin/ofed_info
-    sed -i -e "s/OFED-internal/MLNX_OFED_LINUX/g" /usr/bin/ofed_info
-fi
-
 # Use mlxconfig instead of mstconfig to support BF2
 if [ -x /usr/bin/mlxconfig ]; then
     sed -i -e "s/mstconfig/mlxconfig/g" /sbin/mlnx_bf_configure /sbin/mlnx-sf
@@ -329,6 +315,27 @@ disable_service ibacm.service
 disable_service opensmd.service
 disable_service strongswan-starter.service
 
+fi
+
+# Rebrand the internal OFED version string in ofed_info whenever
+# ofed-scripts provides it. Fires when bf-release is installed while
+# ofed-scripts is present, and when ofed-scripts is installed, upgraded
+# or reinstalled while bf-release is present, so package ordering inside
+# a transaction does not matter.
+# Idempotent: acts only while "OFED-internal" is present in ofed_info.
+%triggerin -- ofed-scripts
+if (grep -q OFED-internal /usr/bin/ofed_info > /dev/null 2>&1); then
+    ofed_version=`ofed_info -n`
+    ofed_minor=${ofed_version#*-}
+    fw_minor=`rpm -q --queryformat "%{RELEASE}" mlnx-fw-updater 2> /dev/null 2>&1 | cut -d '-' -f 2`
+    fw_sub_minor=`echo $fw_minor | cut -d '.' -f -3`
+    if [ "$ofed_minor" == "$fw_sub_minor" ]; then
+        ofed_version=${ofed_version}.`echo $fw_minor | cut -d '.' -f 4`
+    fi
+    sed -i -r -e "s/^(OFED)(.*)(-[0-9]*.*-[0-9]*.*):/MLNX_OFED_LINUX-${ofed_version} (\1\3):\n/" /usr/bin/ofed_info
+    sed -i -r -e "s/(.*then echo) (.*):(.*)/\1 MLNX_OFED_LINUX-${ofed_version}: \3/" /usr/bin/ofed_info
+    sed -i -r -e "s/(.*X-n\" ]; then echo) (.*)(; exit.*)/\1 ${ofed_version} \3/" /usr/bin/ofed_info
+    sed -i -e "s/OFED-internal/MLNX_OFED_LINUX/g" /usr/bin/ofed_info
 fi
 
 %files
